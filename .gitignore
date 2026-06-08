@@ -19,3 +19,4 @@ chroma/
 # macOS
 .DS_Store
 harvest_all.py
+harvest.py

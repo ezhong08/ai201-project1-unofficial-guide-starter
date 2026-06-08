@@ -175,12 +175,31 @@ I will ask ChatGPT on challenges and how to overcome.
 
   **Retrieval test results (3 of 5 eval queries):**
 
-  | Query | Top distance | Relevant? | Notes |
-  | --- | --- | --- | --- |
-  | Bear Choice meal plan cost | 0.211 | ✅ | Top chunk literally contains "Bear Choice - $2,964 per semester" — the expected answer. |
-  | What is the Spotted Duck known for? | 0.351 | ✅ | Top chunk: "known for these ice cream flights where you can try a dozen flavors" — matches expected answer. |
-  | Which campus region is Café Jennie on? | 0.329 → **0.259** | ❌ → ✅ | **Initially failed**: the answer chunk says "The Cornell Store," never "central campus," so it didn't rank in the top 3. The geography was only in the source filename, not the chunk text the embedding sees. |
+  | Query                                  | Top distance      | Relevant? | Notes                                                                                                                                                                                                          |
+  | -------------------------------------- | ----------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Bear Choice meal plan cost             | 0.211             | ✅        | Top chunk literally contains "Bear Choice - $2,964 per semester" — the expected answer.                                                                                                                        |
+  | What is the Spotted Duck known for?    | 0.351             | ✅        | Top chunk: "known for these ice cream flights where you can try a dozen flavors" — matches expected answer.                                                                                                    |
+  | Which campus region is Café Jennie on? | 0.329 → **0.259** | ❌ → ✅   | **Initially failed**: the answer chunk says "The Cornell Store," never "central campus," so it didn't rank in the top 3. The geography was only in the source filename, not the chunk text the embedding sees. |
 
   **Fix applied:** the Café Jennie miss was a vocabulary gap — semantic search matched chunks that literally said "Central/North/West Campus" instead of the chunk naming the eatery. I updated `harvest_pdfs.py` to tag each eatery's name line with its campus (e.g. `Café Jennie 10:00am – 3:00pm (Central Campus)`), derived from the PDF filename, so the region rides into the embedding. After re-ingesting, the Café Jennie chunk became the **#1 result at distance 0.259** and now answers the question directly. This is the kind of name/attribute split my Anticipated Challenges and Chunking Strategy sections predicted.
 
 **Milestone 5 — Generation and interface:**
+
+- **Tool:** Claude Code (in VS Code).
+- **Input I give it:** the requirement that answers be grounded only in retrieved context, must cite their source, and must say so when the answer isn't covered; plus my choice of Groq (`llama-3.3-70b-versatile`) as the LLM and Gradio as the interface.
+- **What I expect it to produce:**
+  1. `generator.py` with `generate_response(query, retrieved_chunks)`: formats the top-k chunks into a numbered, source-labeled context block and sends it to Groq with a grounding system prompt (use only the excerpts, refuse when not covered, cite the source, treat hours/open-status as point-in-time).
+  2. `app.py`: a Gradio chat interface (themed, with dining-specific title, example questions, and a source sidebar) that runs ingestion once on startup, then wires each message through `retrieve()` → `generate_response()`.
+- **How I verify it matches my spec:** I run each of my 5 evaluation questions through the full app and compare the answer to the expected answer, and I test an out-of-scope question to confirm the bot refuses instead of hallucinating.
+
+  **Generation test results:**
+
+  | Query                          | Outcome | Notes                                                                                                                                                                                                        |
+  | ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | Bear Choice meal plan cost     | ✅      | Returns $2,964 with the source cited.                                                                                                                                                                        |
+  | Spotted Duck known for         | ✅      | "ice cream flights where you can try a dozen flavors."                                                                                                                                                       |
+  | Café Jennie campus region      | ✅      | Central Campus (after the Milestone 4 harvest fix).                                                                                                                                                          |
+  | Cornell vs. Rice food          | ❌ → ✅ | **Initially failed**: retrieval returned both the Cornell (`2)`) and Rice (`23)`) chunks, but the strict grounding prompt refused to read the ranking order as a comparison and said "no direct comparison." |
+  | Out-of-scope ("wifi password") | ✅      | Correctly answers "The loaded dining sources don't cover it."                                                                                                                                                |
+
+  **Fix applied:** the Cornell-vs-Rice miss was a _generation/reasoning_ gap, not a retrieval one — the model had both ranks in context but wouldn't infer that #2 beats #23 on a "best food" list. I added a rule to the `generator.py` system prompt allowing it to compare items using rankings/tiers that are explicitly present in the context. After the change it answers "This suggests that Cornell is considered to have better food than Rice University, based on the rankings. (Best-College-Food)".
