@@ -3,8 +3,63 @@ from config import GROQ_API_KEY, LLM_MODEL
 
 _client = Groq(api_key=GROQ_API_KEY)
 
+# How many recent chat messages (user+assistant turns) to keep as conversational
+# memory. Capping this keeps token cost bounded and stops stale context from
+# dominating later turns.
+MAX_HISTORY_MESSAGES = 6
 
-def generate_response(query, retrieved_chunks):
+
+def _recent(history):
+    """Return the last MAX_HISTORY_MESSAGES messages as {role, content} dicts."""
+    if not history:
+        return []
+    # Gradio's "messages" format is already a list of {"role", "content"} dicts.
+    return [
+        {"role": m["role"], "content": m["content"]}
+        for m in history[-MAX_HISTORY_MESSAGES:]
+        if m.get("content")
+    ]
+
+
+def rewrite_query(query, history=None):
+    """
+    Turn a follow-up question into a standalone search query using recent
+    conversation history, so retrieval works even when the question is
+    elliptical (e.g. "What about on North campus?" after asking about Café
+    Jennie). With no history, the query is returned unchanged.
+
+    This is a cheap, best-effort step: if the rewrite call fails for any
+    reason, we fall back to the original query.
+    """
+    recent = _recent(history)
+    if not recent:
+        return query
+
+    convo = "\n".join(f"{m['role']}: {m['content']}" for m in recent)
+    prompt = (
+        "Given the conversation so far and a follow-up question, rewrite the "
+        "follow-up as a single standalone search query that includes any context "
+        "(eatery names, campus, topic) needed to retrieve the right documents. "
+        "If the follow-up is already self-contained, return it unchanged. "
+        "Output ONLY the rewritten query, nothing else.\n\n"
+        f"Conversation:\n{convo}\n\n"
+        f"Follow-up: {query}\n\n"
+        "Standalone query:"
+    )
+    try:
+        resp = _client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=80,
+        )
+        rewritten = (resp.choices[0].message.content or "").strip()
+        return rewritten or query
+    except Exception:
+        return query
+
+
+def generate_response(query, retrieved_chunks, history=None):
     """
     Generate a grounded answer from retrieved Cornell dining chunks.
 
@@ -12,6 +67,12 @@ def generate_response(query, retrieved_chunks):
       - "text"     : the chunk text
       - "article"  : the source/article name
       - "distance" : similarity score (you can use this to filter weak matches)
+
+    `history` is the prior conversation as a list of {"role", "content"} dicts
+    (Gradio's "messages" format). The most recent turns are replayed to the
+    model so it can resolve follow-up questions ("What about North campus?")
+    against earlier ones. The current retrieved context is always the source of
+    truth for facts — history only supplies conversational reference.
 
     Design points worth talking through with your group:
       - How will you format the chunks into a context block for the prompt?
@@ -70,16 +131,18 @@ def generate_response(query, retrieved_chunks):
         "At the end of every response, if the source was not mentioned yet, mention it in the form (source name)."
     )
 
-    # Message structure: instructions go in the system message; the retrieved
-    # context and the user's question go in the user message.
+    # Message structure: instructions go in the system message; recent prior
+    # turns supply conversational memory; the retrieved context and the user's
+    # current question go in the final user message.
     user_message = f"Context:\n{context}\n\nQuestion: {query}"
+
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(_recent(history))  # conversational memory
+    messages.append({"role": "user", "content": user_message})
 
     response = _client.chat.completions.create(
         model=LLM_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt}, # Same every time.
-            {"role": "user", "content": user_message}, # Changes for each query.
-        ],
+        messages=messages,
     )
 
     return response.choices[0].message.content

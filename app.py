@@ -1,7 +1,7 @@
 import gradio as gr
 from ingest import load_documents, chunk_document
 from retriever import embed_and_store, retrieve, get_collection
-from generator import generate_response
+from generator import generate_response, rewrite_query
 
 
 # ---------------------------------------------------------------------------
@@ -48,8 +48,12 @@ def run_ingestion():
 def chat(message, history):
     if not message.strip():
         return ""
-    retrieved = retrieve(message)
-    return generate_response(message, retrieved)
+    # Conversational memory: rewrite an elliptical follow-up into a standalone
+    # query (using prior turns) so retrieval still finds the right chunks, then
+    # pass the history to generation so the model can resolve references.
+    search_query = rewrite_query(message, history)
+    retrieved = retrieve(search_query)
+    return generate_response(message, retrieved, history)
 
 
 # ---------------------------------------------------------------------------
