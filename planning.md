@@ -156,6 +156,16 @@ I will ask ChatGPT on challenges and how to overcome.
 
 **Milestone 3 — Ingestion and chunking:**
 
+- **Tool:** Claude Code (in VS Code).
+- **Input I give it:** my Documents table (the source URLs/PDFs) and my Chunking Strategy section (chunk size = 300 chars, overlap = 50). For harvesting I ask it to write several scripts rather than one generic scraper, because each source type needs a different approach.
+- **What I expect it to produce:**
+  1. Harvesting scripts that collect each source into a plain-text file in `documents/`:
+     `youtube_transcript.py` (transcripts via `youtube-transcript-api`),
+     `harvest_pages.py` (web pages via `requests` + BeautifulSoup, text only),
+     `harvest_pdfs.py` (the Central/North/West PDFs via `pdfplumber`, with site nav/footer boilerplate stripped). Each file gets a `Name / Source` header so attribution survives into the chunks.
+  2. The ingestion code in `ingest.py`: `load_documents()` reads every `.txt` in `documents/`, and `chunk_document()` applies my 300-char / 50-overlap sliding window, tagging each chunk with its source article and a unique `chunk_id`.
+- **How I verify it matches my spec:** run `load_documents()` and confirm it loads the expected number of documents; then chunk everything and print ~5 representative chunks spread across the corpus to inspect them by hand. If I see noise (e.g. PDF navigation, icon-font glyphs) or split name/verdict pairs, I go back and either fix the harvest script or adjust overlap, then re-inspect.
+
 **Milestone 4 — Embedding and retrieval:**
 
 **Milestone 5 — Generation and interface:**
