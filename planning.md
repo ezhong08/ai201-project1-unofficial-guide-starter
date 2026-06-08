@@ -203,3 +203,36 @@ I will ask ChatGPT on challenges and how to overcome.
   | Out-of-scope ("wifi password") | ✅      | Correctly answers "The loaded dining sources don't cover it."                                                                                                                                                |
 
   **Fix applied:** the Cornell-vs-Rice miss was a _generation/reasoning_ gap, not a retrieval one — the model had both ranks in context but wouldn't infer that #2 beats #23 on a "best food" list. I added a rule to the `generator.py` system prompt allowing it to compare items using rankings/tiers that are explicitly present in the context. After the change it answers "This suggests that Cornell is considered to have better food than Rice University, based on the rankings. (Best-College-Food)".
+
+## Stretch Features — Conversational Memory
+
+<!-- Demo or source showing a multi-turn exchange where the second query references
+     context from the first, and the response reflects that memory — not just a
+     coincidence of topic overlap. -->
+
+The system supports conversational memory through two complementary mechanisms:
+
+1. **Query rewriting** (`rewrite_query` in `generator.py`): Before retrieval, the follow-up question is passed to the LLM along with recent conversation history (up to 6 messages). The LLM rewrites elliptical queries — e.g. "What about on North campus?" → "What dining options are available on North campus?" — into a standalone search query that can retrieve relevant chunks on its own.
+
+2. **Context injection** (`generate_response` in `generator.py`): After retrieval, the most recent conversation turns are replayed to the LLM as part of the message history. This lets the model resolve references like "it" or "that place" back to an eatery mentioned earlier, even when those names didn't survive the rewrite step.
+
+The combination means the user can have a natural multi-turn conversation:
+
+```
+User:    Where is Café Jennie located?
+AI:  Café Jennie is located on Central Campus. (Central - Cornell Dining Now)
+
+User:    What about on North campus?
+AI:  On North campus, there is Purcell Community Center. According to the information provided, it features various food options such as Chicken Sandwiches, Burgers, and more. (North - Cornell Dining Now)
+```
+
+In the second turn, `rewrite_query` expands "What about on North campus?" to something like "What dining options are available on North campus?" so retrieval looks for North Campus eateries rather than scattering on unrelated chunks. Then `generate_response` still sees the first turn in its history, so if the user had instead asked "What about there?" the model would know "there" refers to a specific eatery from the previous turn.
+
+**Relevant source code:**
+
+- `generator.py:_recent()` — caps history to the last 6 messages to bound token cost.
+- `generator.py:rewrite_query()` — turns elliptical follow-ups into standalone search queries.
+- `generator.py:generate_response()` — injects history as conversational context for the LLM.
+- `app.py:chat()` — ties rewriting, retrieval, and generation together.
+
+---
