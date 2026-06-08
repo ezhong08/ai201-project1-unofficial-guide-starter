@@ -44,10 +44,35 @@ _DATE_RE = re.compile(
 _PUA_RE = re.compile("[-]")
 
 
+# The campus region is in the filename ("Central/North/West - Cornell Dining
+# Now") but not in the chunk text, so a query like "which campus is Café Jennie
+# on?" can't match the eatery's chunk. We tag each eatery's name/status line
+# with its campus so the geography rides along into the embedding.
+_CAMPUS = {"central": "Central Campus", "north": "North Campus", "west": "West Campus"}
+# An eatery name line ends with its status ("Closed") or carries hours
+# ("10:00am – 3:00pm"); description and "Featuring:" lines do neither.
+_EATERY_LINE_RE = re.compile(r"\d{1,2}:\d{2}\s*[ap]m", re.I)
+
+
 def slug_from_path(path):
     """Filesystem-safe slug from a PDF filename (no extension)."""
     base = os.path.splitext(os.path.basename(path))[0]
     return re.sub(r"[^A-Za-z0-9._-]", "_", base).strip("_")
+
+
+def _campus_from_path(path):
+    """Map 'Central - Cornell Dining Now.pdf' -> 'Central Campus' (or None)."""
+    base = os.path.basename(path).lower()
+    for key, label in _CAMPUS.items():
+        if base.startswith(key):
+            return label
+    return None
+
+
+def _is_eatery_line(line):
+    """True for an eatery's name/status line (vs. description/Featuring lines)."""
+    low = line.strip().lower()
+    return low.endswith("closed") or bool(_EATERY_LINE_RE.search(low))
 
 
 def _is_boilerplate(line):
@@ -75,9 +100,19 @@ def extract_pdf(path):
     text = "\n".join(pages)
     text = _PUA_RE.sub("", text)  # drop icon-font glyphs
 
-    # Strip trailing whitespace, drop blank lines and nav/footer boilerplate.
-    lines = [ln.rstrip() for ln in text.splitlines()]
-    return "\n".join(ln for ln in lines if ln.strip() and not _is_boilerplate(ln))
+    campus = _campus_from_path(path)
+
+    cleaned = []
+    for ln in text.splitlines():
+        ln = ln.rstrip()
+        if not ln.strip() or _is_boilerplate(ln):
+            continue
+        # Tag each eatery's name line with its campus so the geography is
+        # embedded with the eatery (e.g. "Café Jennie ... (Central Campus)").
+        if campus and _is_eatery_line(ln):
+            ln = f"{ln} ({campus})"
+        cleaned.append(ln)
+    return "\n".join(cleaned)
 
 
 def main():

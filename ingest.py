@@ -22,7 +22,7 @@ def load_documents():
 
 def chunk_document(text, article_name):
     """
-    Split a rule document into chunks ready for embedding.
+    Split a document into chunks ready for embedding.
 
     This function is already implemented — read through it and the inline
     comments before moving on. The decisions made here directly shape what
@@ -31,9 +31,9 @@ def chunk_document(text, article_name):
 
     Strategy: character-based sliding window with overlap.
       - chunk_size = 300 characters: long enough to carry the semantic
-        meaning of a single rule, short enough to return targeted results
+        meaning of a single answer, short enough to return targeted results
       - overlap = 50 characters: duplicates a small window of text at each
-        boundary so a rule that spans two chunks can still be retrieved intact
+        boundary so a answer that spans two chunks can still be retrieved intact
       - min_length = 50 characters: filters out whitespace artifacts and
         very short fragments that add noise without useful semantic content
 

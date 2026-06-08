@@ -168,4 +168,19 @@ I will ask ChatGPT on challenges and how to overcome.
 
 **Milestone 4 — Embedding and retrieval:**
 
+- **Tool:** Claude Code (in VS Code).
+- **Input I give it:** my Retrieval Approach section — embedding model `all-MiniLM-L6-v2` via sentence-transformers, top-k = 3, cosine distance.
+- **What I expect it to produce:** `retriever.py` with `embed_and_store()` (adds chunk text to a persistent ChromaDB collection, storing the source article as metadata) and `retrieve()` (embeds the query, runs a cosine similarity search, returns the top-k chunks with their text, source, and distance).
+- **How I verify it matches my spec:** I wrote `eval_retrieval.py` to run 3 of my 5 evaluation questions through `retrieve()` and print the returned chunks with distance scores, then judge by hand whether each result is actually relevant.
+
+  **Retrieval test results (3 of 5 eval queries):**
+
+  | Query | Top distance | Relevant? | Notes |
+  | --- | --- | --- | --- |
+  | Bear Choice meal plan cost | 0.211 | ✅ | Top chunk literally contains "Bear Choice - $2,964 per semester" — the expected answer. |
+  | What is the Spotted Duck known for? | 0.351 | ✅ | Top chunk: "known for these ice cream flights where you can try a dozen flavors" — matches expected answer. |
+  | Which campus region is Café Jennie on? | 0.329 → **0.259** | ❌ → ✅ | **Initially failed**: the answer chunk says "The Cornell Store," never "central campus," so it didn't rank in the top 3. The geography was only in the source filename, not the chunk text the embedding sees. |
+
+  **Fix applied:** the Café Jennie miss was a vocabulary gap — semantic search matched chunks that literally said "Central/North/West Campus" instead of the chunk naming the eatery. I updated `harvest_pdfs.py` to tag each eatery's name line with its campus (e.g. `Café Jennie 10:00am – 3:00pm (Central Campus)`), derived from the PDF filename, so the region rides into the embedding. After re-ingesting, the Café Jennie chunk became the **#1 result at distance 0.259** and now answers the question directly. This is the kind of name/attribute split my Anticipated Challenges and Chunking Strategy sections predicted.
+
 **Milestone 5 — Generation and interface:**
