@@ -47,6 +47,7 @@ I chose dining at Cornell University as my domain. This knowledge is valuable to
 **Overlap:** 50
 
 **Reasoning:** Although the text files are of different formats, they all consist of a certain place and then a few sentences describing that place, so a constant chunk size should be able to successfully capture each place.
+I'd know my chunks were too small if retrieval returned a fragment with a rating but no restaurant name (or a name with no verdict) — answers would be unanswerable or attached to the wrong place. I'd know they were too large if a single chunk spanned several restaurants, because the embedding would blur multiple places together and a query about one eatery would pull in unrelated neighbors, diluting precision. 300/50 is my starting point; if my five evaluation questions show name/verdict splits, I'd raise the overlap before changing chunk size.
 
 ---
 
@@ -89,9 +90,9 @@ I chose dining at Cornell University as my domain. This knowledge is valuable to
      Consider: noisy or inconsistent documents, missing source attribution, off-topic
      retrieval, chunks that split key information across boundaries. -->
 
-1.
+1. best-college-food.txt ranks 25 colleges, and only #2 (Cornell) is on-topic. a query like "is the dining good?" can pull the wrong school.
 
-2.
+2. The Central / North / West PDFs are a snapshot captured on "Sunday, June 7, 2026", which would get a misleading "Closed" that reflects one day.
 
 ---
 
@@ -102,6 +103,38 @@ I chose dining at Cornell University as my domain. This knowledge is valuable to
      Label each stage with the tool or library you're using.
      You can use ASCII art, a Mermaid diagram, or embed a sketch as an image.
      You'll use this diagram as context when prompting AI tools to implement each stage. -->
+
+```mermaid
+flowchart TD
+    subgraph SRC[Raw Sources]
+        S2[YouTube videos]
+        S3[Web pages: SCL, blog]
+        S4[PDFs: Central/North/West]
+    end
+
+    subgraph INGEST["① Document Ingestion"]
+        H2[youtube_transcript.py — youtube-transcript-api]
+        H3[harvest_pages.py — requests + BeautifulSoup]
+        H4[harvest_pdfs.py — pdfplumber]
+        DOCS[(documents/ — .txt files)]
+        LOAD["ingest.py: load_documents()"]
+    end
+
+    S2 --> H2 --> DOCS
+    S3 --> H3 --> DOCS
+    S4 --> H4 --> DOCS
+    DOCS --> LOAD
+
+    LOAD --> CHUNK["② Chunking<br/>ingest.py: chunk_document()<br/>300 chars, 50 overlap"]
+    CHUNK --> EMB["③ Embedding + Vector Store<br/>sentence-transformers (all-MiniLM-L6-v2)<br/>→ ChromaDB (persistent ./chroma_db)"]
+
+    Q([User question]) --> QEMB["Embed query<br/>all-MiniLM-L6-v2"]
+    QEMB --> RET["④ Retrieval<br/>ChromaDB similarity search, top-k = 3"]
+    EMB -. indexed vectors .-> RET
+    RET --> GEN["⑤ Generation<br/>Groq API (llama-3.3-70b-versatile)<br/>prompt = question + retrieved chunks"]
+    GEN --> UI["Gradio chat interface (app.py)"]
+    UI --> A([Grounded answer])
+```
 
 ---
 
@@ -116,6 +149,10 @@ I chose dining at Cornell University as my domain. This knowledge is valuable to
      "I'll use AI to help me code" is not a plan.
      "I'll give Claude my Chunking Strategy section and ask it to implement chunk_text()
      with my specified chunk size and overlap" is a plan. -->
+
+I will ask Claude Code to help me harvest web site.
+I will use the starter project "ai201-lab1-rulesbot-starter" as base project, and ask Claude Code project;
+I will ask ChatGPT on challenges and how to overcome.
 
 **Milestone 3 — Ingestion and chunking:**
 
