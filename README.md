@@ -321,6 +321,102 @@ In the second turn, `rewrite_query` expands "What about on North campus?" to som
 
 ---
 
+## Stretch Features — Hybrid Search
+
+<!-- Describe the hybrid approach (how BM25 and semantic scores are combined),
+     report a comparison on at least 3 queries (what each method returned and
+     which performed better), and point to a demo or source that runs it. -->
+
+### How the hybrid approach combines BM25 + semantic
+
+`hybrid_retrieve()` in `retriever.py` runs two independent retrievers over the
+same 352-chunk store and fuses their rankings:
+
+1. **Semantic** — ChromaDB cosine search over `all-MiniLM-L6-v2` embeddings.
+   Strong on meaning/paraphrase, weak when the answer hinges on an exact rare
+   token (an eatery name, a competitor name).
+2. **BM25 keyword** — `rank_bm25.BM25Okapi` over a lazily-built, lowercase-
+   tokenized index of every chunk (`_rebuild_bm25_index()` / `_get_bm25_scores()`).
+   Strong on exact term overlap, blind to synonyms.
+
+The two ranked lists are merged with **Reciprocal Rank Fusion (RRF)** rather
+than by mixing raw scores (cosine distance and BM25 magnitudes aren't
+comparable). Each retriever fetches `n_results * 3` candidates, and every chunk
+earns `1 / (k + rank)` from each list (`k = 60`), keyed by chunk text so the
+same chunk's contributions add up:
+
+```
+hybrid_score(chunk) = alpha * 1/(k + rank_semantic) + (1 - alpha) * 1/(k + rank_bm25)
+```
+
+`alpha` is the semantic weight: `alpha=1.0` is pure semantic, `alpha=0.0` is
+pure BM25, `alpha=0.5` is balanced. Using *ranks* instead of scores means a
+chunk that lands near the top of *either* retriever rises in the fused list,
+which is exactly the rescue behavior we want.
+
+### Comparison on 3 queries
+
+Run with `python eval_hybrid.py` (top-k = 3). Numbers below are from that run;
+"✓" marks the chunk that actually answers the question.
+
+**Query 1 — "What is the cost of the Bear Choice meal plan for undergraduates over 1 semester?"** (answer: the chunk listing `Bear Choice - $2,964`)
+
+| Method | Rank 1 | Answer chunk position |
+| --- | --- | --- |
+| Semantic (α=1.0) | ✓ Bear Traditional/Bear Choice price chunk (dist 0.211) | **#1** |
+| BM25 (α=0.0) | "4 bonus meals for guests…" (bm25 18.56) | **not in top 3** |
+| Hybrid (α=0.5) | ✓ Bear Traditional/Bear Choice price chunk (dist 0.211) | **#1** |
+
+BM25-only over-rewarded chunks dense in generic tokens ("meals", "semester",
+"undergraduates") and never surfaced the priced chunk. Semantic and hybrid both
+put the answer at #1. **Winner: semantic ≈ hybrid; BM25-only fails.**
+
+**Query 2 — "What is the Spotted Duck sweet place known for?"** (answer: "ice cream flights where you can try a dozen flavors")
+
+| Method | Rank 1 | Answer chunk position |
+| --- | --- | --- |
+| Semantic (α=1.0) | ✓ "known for these ice cream flights…" (dist 0.351) | **#1** |
+| BM25 (α=0.0) | "…soft serve place… A tier" (bm25 21.94) | #2 (bm25 15.54) |
+| Hybrid (α=0.5) | ✓ "known for these ice cream flights…" | **#1** |
+
+BM25-only ranked a chunk *denser* in "Spotted Duck"/"place" tokens above the one
+that actually states what it's known for, demoting the answer to #2. RRF pulled
+the answer back to #1 because semantic ranked it first. **Winner: semantic ≈ hybrid.**
+
+**Query 3 — "Is Cornell considered to have better food than Rice University?"** (needs *both* the Cornell rank chunk, "2) Cornell", and the Rice rank chunk, "23) Rice University")
+
+| Method | Top 3 | Both ranking chunks present? |
+| --- | --- | --- |
+| Semantic (α=1.0) | [1] Cornell "2)" (0.288), [2] Cornell blurb (0.331), [3] ✓ Rice "23)" (0.345) | Yes, but Rice buried at #3 |
+| BM25 (α=0.0) | [1] ✓ Rice "23)" (bm25 10.89), [2] Franny's food truck, [3] clean-ingredients blurb | **No — Cornell rank chunk dropped** |
+| Hybrid (α=0.5) | [1] ✓ Rice "23)", [2] Cornell "2)", [3] Cornell dining blurb | **Yes — both ranks in top 2** |
+
+This is the query where hybrid clearly wins. The comparison needs both ranks side
+by side: pure semantic buried the exact-entity "Rice University" chunk at #3,
+and pure BM25 found Rice but dropped Cornell's rank. **Hybrid surfaced both
+ranking chunks in the top two** — the exact-name match (BM25's strength) and the
+conceptual Cornell-dining match (semantic's strength) reinforcing each other
+through RRF. **Winner: hybrid.**
+
+### Takeaway
+
+On conceptual/paraphrase queries (1, 2) hybrid matches semantic and avoids
+BM25-only's failures; on the entity-comparison query (3) where an exact name
+matters, hybrid beats pure semantic by promoting the keyword-matched chunk while
+keeping the semantically-relevant one. The balanced `alpha=0.5` never did worse
+than the better of the two single methods.
+
+### Demo / source
+
+- **`eval_hybrid.py`** — runs all 5 evaluation queries through semantic-only,
+  hybrid (α=0.5), and BM25-only side by side and prints the rankings above.
+- **`retriever.py:hybrid_retrieve()`** — the RRF implementation.
+- **`app.py:chat()`** — swap the live retrieval to hybrid by uncommenting the
+  `hybrid_retrieve(search_query, alpha=0.5)` line (the semantic-only `retrieve()`
+  is the default).
+
+---
+
 ## AI Usage
 
 <!-- Describe at least 2 specific instances where you used an AI tool during this project.

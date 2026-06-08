@@ -1,6 +1,6 @@
 import gradio as gr
 from ingest import load_documents, chunk_document
-from retriever import embed_and_store, retrieve, get_collection
+from retriever import embed_and_store, retrieve, hybrid_retrieve, get_collection
 from generator import generate_response, rewrite_query
 
 
@@ -49,11 +49,14 @@ def chat(message, history):
     if not message.strip():
         return ""
     # Conversational memory: rewrite an elliptical follow-up into a standalone
-    # query (using prior turns) so retrieval still finds the right chunks, then
-    # pass the history to generation so the model can resolve references.
+    # query (using prior turns) so retrieval still finds the right chunks.
+    # The rewritten query is passed directly to generation so the LLM never
+    # sees a potentially ambiguous elliptical question or gets confused by
+    # prior conversation history.
     search_query = rewrite_query(message, history)
-    retrieved = retrieve(search_query)
-    return generate_response(message, retrieved, history)
+    # retrieved = retrieve(search_query)
+    retrieved = hybrid_retrieve(search_query, alpha=0.5)
+    return generate_response(search_query, retrieved)
 
 
 # ---------------------------------------------------------------------------
@@ -118,11 +121,11 @@ with gr.Blocks(
                     <ul style="font-size:0.85rem; color:#5b21b6; list-style:none;
                                 padding:0; margin:0; line-height:1.8;">
                         <li>🍽️ Campus eateries (Central, North, West)</li>
-                        <li>💳 Meal plans &amp; rates</li>
+                        <li>💳 Meal plans & rates</li>
                         <li>📖 Guide to Cornell Dining</li>
                         <li>🎥 Student dining rankings</li>
-                        <li>🍰 Sweets &amp; ice cream spots</li>
-                        <li>🌆 Collegetown &amp; Ithaca restaurants</li>
+                        <li>🍰 Sweets & ice cream spots</li>
+                        <li>🌆 Collegetown & Ithaca restaurants</li>
                         <li>🏫 College food comparisons</li>
                     </ul>
                     <hr style="border:none; border-top:1px solid #ddd6fe; margin:0.75rem 0;">

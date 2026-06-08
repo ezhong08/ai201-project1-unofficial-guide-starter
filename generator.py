@@ -37,11 +37,27 @@ def rewrite_query(query, history=None):
 
     convo = "\n".join(f"{m['role']}: {m['content']}" for m in recent)
     prompt = (
-        "Given the conversation so far and a follow-up question, rewrite the "
-        "follow-up as a single standalone search query that includes any context "
-        "(eatery names, campus, topic) needed to retrieve the right documents. "
-        "If the follow-up is already self-contained, return it unchanged. "
-        "Output ONLY the rewritten query, nothing else.\n\n"
+        "You resolve elliptical follow-up questions into standalone search queries.\n\n"
+        "Rewrite the follow-up ONLY IF it depends on the prior conversation to be "
+        "understood — i.e. it uses pronouns or references ('it', 'there', 'that one', "
+        "'what about...') or omits the subject. In that case, substitute in the "
+        "specific context (eatery name, campus, topic) it refers to.\n\n"
+        "If the follow-up is already a complete, self-contained question — even if it "
+        "introduces a NEW topic unrelated to the prior turns — return it EXACTLY "
+        "unchanged. Do NOT inject names, eateries, or topics from earlier turns into a "
+        "question that did not mention them. When in doubt, return it unchanged.\n\n"
+        "Output ONLY the query, nothing else.\n\n"
+        "Examples:\n"
+        "Conversation:\n"
+        "user: Where on campus is Café Jennie located?\n"
+        "assistant: Café Jennie is in Mann Library on the Ag Quad.\n"
+        "Follow-up: What are its hours?\n"
+        "Standalone query: What are Café Jennie's hours?\n\n"
+        "Conversation:\n"
+        "user: What is the Bear Choice meal plan?\n"
+        "assistant: It's an unlimited dining plan...\n"
+        "Follow-up: Does Cornell provide reusable utensils? If so, where?\n"
+        "Standalone query: Does Cornell provide reusable utensils? If so, where?\n\n"
         f"Conversation:\n{convo}\n\n"
         f"Follow-up: {query}\n\n"
         "Standalone query:"
@@ -59,7 +75,7 @@ def rewrite_query(query, history=None):
         return query
 
 
-def generate_response(query, retrieved_chunks, history=None):
+def generate_response(query, retrieved_chunks):
     """
     Generate a grounded answer from retrieved Cornell dining chunks.
 
@@ -68,11 +84,9 @@ def generate_response(query, retrieved_chunks, history=None):
       - "article"  : the source/article name
       - "distance" : similarity score (you can use this to filter weak matches)
 
-    `history` is the prior conversation as a list of {"role", "content"} dicts
-    (Gradio's "messages" format). The most recent turns are replayed to the
-    model so it can resolve follow-up questions ("What about North campus?")
-    against earlier ones. The current retrieved context is always the source of
-    truth for facts — history only supplies conversational reference.
+    `query` has already been rewritten into a standalone query by `rewrite_query`
+    in app.py, so no conversational history is needed here — the question is
+    always self-contained.
 
     Design points worth talking through with your group:
       - How will you format the chunks into a context block for the prompt?
@@ -137,7 +151,9 @@ def generate_response(query, retrieved_chunks, history=None):
     user_message = f"Context:\n{context}\n\nQuestion: {query}"
 
     messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(_recent(history))  # conversational memory
+    # No conversational history is injected here — the query has already been
+    # rewritten into a standalone question by rewrite_query(), so prior turns
+    # would only add noise and potentially mislead the model.
     messages.append({"role": "user", "content": user_message})
 
     response = _client.chat.completions.create(
